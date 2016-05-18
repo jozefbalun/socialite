@@ -13,22 +13,22 @@ abstract class AbstractProvider implements ProviderContract
     /**
      * The HTTP request instance.
      *
-     * @var \Illuminate\Http\Request
+     * @var Request
      */
     protected $request;
 
     /**
      * The OAuth server implementation.
      *
-     * @var \League\OAuth1\Client\Server\Server
+     * @var Server
      */
     protected $server;
 
     /**
      * Create a new provider instance.
      *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  \League\OAuth1\Client\Server\Server  $server
+     * @param  Request  $request
+     * @param  Server  $server
      * @return void
      */
     public function __construct(Request $request, Server $server)
@@ -40,13 +40,19 @@ abstract class AbstractProvider implements ProviderContract
     /**
      * Redirect the user to the authentication page for the provider.
      *
-     * @return \Symfony\Component\HttpFoundation\RedirectResponse
+     * @return RedirectResponse
      */
     public function redirect()
     {
-        $this->request->getSession()->set(
-            'oauth.temp', $temp = $this->server->getTemporaryCredentials()
-        );
+        if (!$this->isStateless()) {
+            $this->request->getSession()->set(
+                'oauth.temp', $temp = $this->server->getTemporaryCredentials()
+            );
+        } else {
+            $temp = $this->server->getTemporaryCredentials();
+            setcookie('oauth_temp',serialize($temp));
+
+        }
 
         return new RedirectResponse($this->server->getAuthorizationUrl($temp));
     }
@@ -54,7 +60,6 @@ abstract class AbstractProvider implements ProviderContract
     /**
      * Get the User instance for the authenticated user.
      *
-     * @throws \InvalidArgumentException
      * @return \Laravel\Socialite\One\User
      */
     public function user()
@@ -66,7 +71,7 @@ abstract class AbstractProvider implements ProviderContract
         $user = $this->server->getUserDetails($token = $this->getToken());
 
         $instance = (new User)->setRaw($user->extra)
-                ->setToken($token->getIdentifier(), $token->getSecret());
+            ->setToken($token->getIdentifier(), $token->getSecret());
 
         return $instance->map([
             'id' => $user->uid, 'nickname' => $user->nickname,
@@ -81,11 +86,21 @@ abstract class AbstractProvider implements ProviderContract
      */
     protected function getToken()
     {
-        $temp = $this->request->getSession()->get('oauth.temp');
+        if (!$this->isStateless()) {
+            $temp = $this->request->getSession()->get('oauth.temp');
 
-        return $this->server->getTokenCredentials(
-            $temp, $this->request->get('oauth_token'), $this->request->get('oauth_verifier')
-        );
+            return $this->server->getTokenCredentials(
+                $temp, $this->request->get('oauth_token'), $this->request->get('oauth_verifier')
+            );
+        } else {
+
+            $temp = unserialize($_COOKIE['oauth_temp']);
+
+            return $this->server->getTokenCredentials(
+                $temp, $this->request->get('oauth_token'), $this->request->get('oauth_verifier')
+            );
+
+        }
     }
 
     /**
@@ -101,12 +116,42 @@ abstract class AbstractProvider implements ProviderContract
     /**
      * Set the request instance.
      *
-     * @param  \Illuminate\Http\Request  $request
+     * @param  Request  $request
      * @return $this
      */
     public function setRequest(Request $request)
     {
         $this->request = $request;
+
+        return $this;
+    }
+
+    /**
+     * Indicates if the session state should be utilized.
+     *
+     * @var bool
+     */
+    protected $stateless = false;
+
+    /**
+     * Determine if the provider is operating as stateless.
+     *
+     * @editedBy Felipe Marques <contato@felipemarques.com.br>
+     * @return bool
+     */
+    protected function isStateless()
+    {
+        return $this->stateless;
+    }
+
+    /**
+     * Indicates that the provider should operate as stateless.
+     *
+     * @return $this
+     */
+    public function stateless()
+    {
+        $this->stateless = true;
 
         return $this;
     }
