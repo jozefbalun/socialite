@@ -5,6 +5,7 @@ namespace Laravel\Socialite\One;
 use Illuminate\Http\Request;
 use InvalidArgumentException;
 use League\OAuth1\Client\Server\Server;
+use Mockery\CountValidator\Exception;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Laravel\Socialite\Contracts\Provider as ProviderContract;
 
@@ -49,9 +50,15 @@ abstract class AbstractProvider implements ProviderContract
                 'oauth.temp', $temp = $this->server->getTemporaryCredentials()
             );
         } else {
+            $file = storage_path('app').DIRECTORY_SEPARATOR.'oauth.temp';
             $temp = $this->server->getTemporaryCredentials();
-            setcookie('oauth_temp',serialize($temp));
-
+            if (file_exists($file) === false) {
+                try {
+                    file_put_contents($file, serialize($temp));
+                } catch (\Exception $e) {
+                    \Log::alert('Could not write temp credentials. Is your storage/app path writable?');
+                }
+            }
         }
 
         return new RedirectResponse($this->server->getAuthorizationUrl($temp));
@@ -93,8 +100,9 @@ abstract class AbstractProvider implements ProviderContract
                 $temp, $this->request->get('oauth_token'), $this->request->get('oauth_verifier')
             );
         } else {
-
-            $temp = unserialize($_COOKIE['oauth_temp']);
+            $file = storage_path('app').DIRECTORY_SEPARATOR.'oauth.temp';
+            $temp = unserialize(file_get_contents($file));
+            @unlink($file);
 
             return $this->server->getTokenCredentials(
                 $temp, $this->request->get('oauth_token'), $this->request->get('oauth_verifier')
